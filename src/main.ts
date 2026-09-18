@@ -44,6 +44,7 @@ interface RemotePlayerState {
 }
 
 const ROUND_DURATION = 15;
+const PLAYER_SIZE = 32;
 
 const questions = [
   {
@@ -195,6 +196,46 @@ const player: Player = {
 const remotePlayers = new Map<string, RemotePlayerState>();
 const keys = new Set<string>();
 
+function getMaxPlayerPosition(): {
+  maxX: number;
+  maxY: number;
+} {
+  return {
+    maxX: Math.max(0, arena.clientWidth - PLAYER_SIZE),
+    maxY: Math.max(0, arena.clientHeight - PLAYER_SIZE),
+  };
+}
+
+function normalizePosition(
+  x: number,
+  y: number,
+): {
+  x: number;
+  y: number;
+} {
+  const { maxX, maxY } = getMaxPlayerPosition();
+
+  return {
+    x: maxX > 0 ? Math.max(0, Math.min(1, x / maxX)) : 0,
+    y: maxY > 0 ? Math.max(0, Math.min(1, y / maxY)) : 0,
+  };
+}
+
+function denormalizePosition(
+  x: number,
+  y: number,
+): {
+  x: number;
+  y: number;
+} {
+  const { maxX, maxY } = getMaxPlayerPosition();
+
+  return {
+    x: Math.max(0, Math.min(maxX, x * maxX)),
+    y: Math.max(0, Math.min(maxY, y * maxY)),
+  };
+}
+
 function renderQuestion(): void {
   const question = questions[currentQuestionIndex];
 
@@ -231,10 +272,8 @@ function isPlayerInsideAnswer(
   x: number,
   y: number,
 ): boolean {
-  const playerSize = 32;
-
-  const playerCenterX = x + playerSize / 2;
-  const playerCenterY = y + playerSize / 2;
+  const playerCenterX = x + PLAYER_SIZE / 2;
+  const playerCenterY = y + PLAYER_SIZE / 2;
 
   const arenaRect = arena.getBoundingClientRect();
 
@@ -313,16 +352,21 @@ function createRemotePlayerElement(
   remotePlayerId: string,
   remotePlayer: RemotePlayer,
 ): RemotePlayerState {
+  const position = denormalizePosition(
+    remotePlayer.x,
+    remotePlayer.y,
+  );
+
   const element = document.createElement('div');
 
   element.className = `player player-${remotePlayer.shape}`;
   element.dataset.playerId = remotePlayerId;
   element.style.backgroundColor = remotePlayer.color;
   element.style.transform =
-    `translate(${remotePlayer.x}px, ${remotePlayer.y}px)`;
+    `translate(${position.x}px, ${position.y}px)`;
   element.style.opacity = isPlayerInsideAnswer(
-    remotePlayer.x,
-    remotePlayer.y,
+    position.x,
+    position.y,
   )
     ? '0.15'
     : '1';
@@ -331,12 +375,12 @@ function createRemotePlayerElement(
 
   const state: RemotePlayerState = {
     element,
-    currentX: remotePlayer.x,
-    currentY: remotePlayer.y,
-    startX: remotePlayer.x,
-    startY: remotePlayer.y,
-    targetX: remotePlayer.x,
-    targetY: remotePlayer.y,
+    currentX: position.x,
+    currentY: position.y,
+    startX: position.x,
+    startY: position.y,
+    targetX: position.x,
+    targetY: position.y,
     interpolationStart: performance.now(),
   };
 
@@ -370,10 +414,18 @@ function updateRemotePlayers(
       return;
     }
 
+    const position = denormalizePosition(
+      remotePlayer.x,
+      remotePlayer.y,
+    );
+
     let state = remotePlayers.get(remotePlayerId);
 
     if (!state) {
-      state = createRemotePlayerElement(remotePlayerId, remotePlayer);
+      state = createRemotePlayerElement(
+        remotePlayerId,
+        remotePlayer,
+      );
     }
 
     state.element.className = `player player-${remotePlayer.shape}`;
@@ -382,8 +434,8 @@ function updateRemotePlayers(
     state.startX = state.currentX;
     state.startY = state.currentY;
 
-    state.targetX = remotePlayer.x;
-    state.targetY = remotePlayer.y;
+    state.targetX = position.x;
+    state.targetY = position.y;
 
     state.interpolationStart = performance.now();
   });
@@ -422,15 +474,7 @@ function updateRemotePlayerPositions(timestamp: number): void {
 
 function updatePlayerPosition(): void {
   if (!isTeacher && !isFrozen) {
-    const maxX = Math.max(
-      0,
-      arena.clientWidth - player.element.offsetWidth,
-    );
-
-    const maxY = Math.max(
-      0,
-      arena.clientHeight - player.element.offsetHeight,
-    );
+    const { maxX, maxY } = getMaxPlayerPosition();
 
     if (keys.has('ArrowLeft')) {
       player.x -= player.speed;
@@ -464,7 +508,16 @@ let lastSyncTime = 0;
 
 function syncPlayerPosition(timestamp: number): void {
   if (!isTeacher && !isFrozen && timestamp - lastSyncTime >= 100) {
-    savePlayerPosition(player.x, player.y);
+    const normalizedPosition = normalizePosition(
+      player.x,
+      player.y,
+    );
+
+    savePlayerPosition(
+      normalizedPosition.x,
+      normalizedPosition.y,
+    );
+
     lastSyncTime = timestamp;
   }
 
@@ -591,10 +644,10 @@ function getPlayerAnswer(
     return null;
   }
 
-  const playerSize = 32;
+  const position = denormalizePosition(x, y);
 
-  const playerCenterX = x + playerSize / 2;
-  const playerCenterY = y + playerSize / 2;
+  const playerCenterX = position.x + PLAYER_SIZE / 2;
+  const playerCenterY = position.y + PLAYER_SIZE / 2;
 
   const answerElements = getAnswerElements();
   const arenaRect = arena.getBoundingClientRect();
@@ -694,7 +747,7 @@ function resetLocalPlayer(): void {
   player.element.style.opacity = '1';
 
   if (!isTeacher) {
-    savePlayerPosition(player.x, player.y);
+    savePlayerPosition(0, 0);
   }
 
   updateSelectedAnswer();
@@ -766,7 +819,7 @@ playButton.addEventListener('click', async () => {
   clearAnswerResults();
 
   reportModal.classList.add('hidden');
-  
+
   playButton.textContent = '↻ Replay';
 
   await resetAllPlayers(playersSnapshot);
@@ -856,6 +909,51 @@ window.addEventListener('keyup', (event) => {
   }
 });
 
+window.addEventListener('resize', () => {
+  if (isTeacher) {
+    return;
+  }
+
+  const normalizedPosition = normalizePosition(
+    player.x,
+    player.y,
+  );
+
+  const newPosition = denormalizePosition(
+    normalizedPosition.x,
+    normalizedPosition.y,
+  );
+
+  player.x = newPosition.x;
+  player.y = newPosition.y;
+
+  player.element.style.transform =
+    `translate(${player.x}px, ${player.y}px)`;
+
+  remotePlayers.forEach((state, remotePlayerId) => {
+    const remotePlayer = playersSnapshot[remotePlayerId];
+
+    if (!remotePlayer) {
+      return;
+    }
+
+    const position = denormalizePosition(
+      remotePlayer.x,
+      remotePlayer.y,
+    );
+
+    state.currentX = position.x;
+    state.currentY = position.y;
+    state.startX = position.x;
+    state.startY = position.y;
+    state.targetX = position.x;
+    state.targetY = position.y;
+    state.interpolationStart = performance.now();
+  });
+
+  updateSelectedAnswer();
+});
+
 window.addEventListener('beforeunload', () => {
   if (!isTeacher) {
     removePlayer();
@@ -864,7 +962,12 @@ window.addEventListener('beforeunload', () => {
 
 renderQuestion();
 
-createPlayer(player.x, player.y, player.shape, randomColor);
+createPlayer(
+  0,
+  0,
+  player.shape,
+  randomColor,
+);
 
 listenToPlayers(updateRemotePlayers);
 

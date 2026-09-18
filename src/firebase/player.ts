@@ -109,8 +109,8 @@ export function listenToPlayers(
       }
 
       validPlayers[playerId] = {
-        x: player.x,
-        y: player.y,
+        x: Math.max(0, Math.min(1, player.x)),
+        y: Math.max(0, Math.min(1, player.y)),
         shape: player.shape,
         color: player.color,
       };
